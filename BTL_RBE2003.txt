@@ -1,0 +1,435 @@
+classdef BTL_RBE2003 < matlab.apps.AppBase
+
+    % Properties that correspond to app components
+    properties (Access = public)
+        UIFigure                   matlab.ui.Figure
+        ROBOTICARMSIMULATIONLabel  matlab.ui.control.Label
+        InverseButton              matlab.ui.control.Button
+        ForwardButton              matlab.ui.control.Button
+        PositionLabel              matlab.ui.control.Label
+        AngleLabel                 matlab.ui.control.Label
+        ZEditField                 matlab.ui.control.EditField
+        ZEditFieldLabel            matlab.ui.control.Label
+        YEditField                 matlab.ui.control.EditField
+        YEditFieldLabel            matlab.ui.control.Label
+        XEditField                 matlab.ui.control.EditField
+        XEditFieldLabel            matlab.ui.control.Label
+        Theta1EditField_4          matlab.ui.control.EditField
+        Theta1EditField_4Label     matlab.ui.control.Label
+        Theta1EditField_3          matlab.ui.control.EditField
+        Theta1EditField_3Label     matlab.ui.control.Label
+        Theta1EditField_2          matlab.ui.control.EditField
+        Theta1EditField_2Label     matlab.ui.control.Label
+        Theta1EditField            matlab.ui.control.EditField
+        Theta1EditFieldLabel       matlab.ui.control.Label
+        Label                      matlab.ui.control.Label
+        UIAxes                     matlab.ui.control.UIAxes
+    end
+
+    % Callbacks that handle component events
+    methods (Access = private)
+
+        % Button pushed function: ForwardButton
+        function ForwardButtonPushed(app, event)
+            pi = 3.1416;
+
+            % Joint angles (degrees to radians)
+            theta1 = deg2rad(str2double(app.Theta1EditField.Value));
+            theta2 = deg2rad(str2double(app.Theta1EditField_2.Value));
+            theta3 = deg2rad(str2double(app.Theta1EditField_3.Value));
+            theta4 = deg2rad(str2double(app.Theta1EditField_4.Value));
+        
+            % Link lengths
+            L1 = 200; L2 = 150; L3 = 150; L4 = 50;
+        
+            % Forward kinematics
+            T01 = dh_transform(theta1, L1, 0, pi/2);
+            T12 = dh_transform(theta2, 0, L2, 0);
+            T23 = dh_transform(theta3, 0, L3, 0);
+            T34 = dh_transform(theta4, 0, L4, 0);
+            T02 = T01 * T12; T03 = T02 * T23; T04 = T03 * T34;
+        
+            % Joint positions
+            P0 = [0; 0; 35];
+            P1 = T01(1:3, 4) + [0; 0; 35];
+            P2 = T02(1:3, 4) + [0; 0; 35];
+            P3 = T03(1:3, 4) + [0; 0; 35];
+            P4 = T04(1:3, 4) + [0; 0; 35];  % End effector
+        
+            % Update XYZ display
+            app.XEditField.Value = num2str(round(P4(1), 3));
+            app.YEditField.Value = num2str(round(P4(2), 3));
+            app.ZEditField.Value = num2str(round(P4(3), 3));
+        
+            % Plot setup
+            cla(app.UIAxes);
+            hold(app.UIAxes, 'on');
+            axis(app.UIAxes, 'equal');
+            view(app.UIAxes, 3);
+            rotate3d(app.UIAxes, 'on');
+            grid(app.UIAxes, 'on');
+            xlim(app.UIAxes, [-300 300]);
+            ylim(app.UIAxes, [-300 300]);
+            zlim(app.UIAxes, [0 500]);
+            xlabel(app.UIAxes, 'X'); ylabel(app.UIAxes, 'Y'); zlabel(app.UIAxes, 'Z');
+        
+            % Checkerboard floor
+            [Xf, Yf] = meshgrid(-200:25:200, -200:25:200);
+            Zf = zeros(size(Xf));
+            checker = mod(floor(Xf/25) + floor(Yf/25), 2);
+            surf(app.UIAxes, Xf, Yf, Zf, 'CData', checker, 'FaceColor', 'flat', ...
+                 'EdgeColor', 'none', 'FaceAlpha', 0.2);
+        
+            % Bigger base cylinders
+            draw_cylinder_inline([0; 0; 0], [0; 0; 25], 100, [0.2 0.2 0.2]);   % Bottom
+            draw_cylinder_inline([0; 0; 25], [0; 0; 35], 70, [0.3 0.3 0.3]);   % Top
+            draw_hemisphere([0; 0; 35], 30, 'z', [0.6 0.2 0.2]);               % Dome
+        
+            % Draw links and joints
+            positions = [P0, P1, P2, P3, P4];
+            link_colors = [1 0.5 0; 0 0 1; 0 0.6 0; 1 0.4 0.6];
+        
+            for i = 1:4
+                p1 = positions(:, i);
+                p2 = positions(:, i+1);
+                draw_cylinder_inline(p1, p2, 10, link_colors(i, :));
+                draw_cylinder_inline(p1 - 5 * (p2 - p1)/norm(p2 - p1), ...
+                                     p1 + 5 * (p2 - p1)/norm(p2 - p1), ...
+                                     13, [0.8 0.1 0.1]);
+                plot3(app.UIAxes, [p1(1) p2(1)], [p1(2) p2(2)], [p1(3) p2(3)], ...
+                      'k--', 'LineWidth', 0.5);
+                text(app.UIAxes, p1(1)+5, p1(2), p1(3)+12, sprintf('q%d', i), ...
+                     'Color', 'red', 'FontSize', 10);
+            end
+        
+            % === Gripper cones pointing in new Z axis (was X before) ===
+            new_z = T04(1:3, 1);        % Previously x-axis
+            side_vector = T04(1:3, 2);  % Previously y-axis, now used for spacing
+        
+            grip_offset = 10;
+            cone_length = 30;
+            cone_radius = 6;
+        
+            base1 = P4 + side_vector * grip_offset;
+            base2 = P4 - side_vector * grip_offset;
+            tip1 = base1 + new_z * cone_length;
+            tip2 = base2 + new_z * cone_length;
+        
+            draw_cone(base1, tip1, cone_radius, [1 1 0]);
+            draw_cone(base2, tip2, cone_radius, [1 1 0]);
+        
+            % === Swapped XYZ frame (Z points in old X direction) ===
+            l = 40;
+            new_x = T04(1:3, 3); % previously z
+            new_y = T04(1:3, 2); % same
+            new_z = T04(1:3, 1); % previously x
+        
+            quiver3(app.UIAxes, P4(1), P4(2), P4(3), l*new_x(1), l*new_x(2), l*new_x(3), 'r', 'LineWidth', 2);
+            quiver3(app.UIAxes, P4(1), P4(2), P4(3), l*new_y(1), l*new_y(2), l*new_y(3), 'g', 'LineWidth', 2);
+            quiver3(app.UIAxes, P4(1), P4(2), P4(3), l*new_z(1), l*new_z(2), l*new_z(3), 'b', 'LineWidth', 2);
+            text(app.UIAxes, P4(1)+l*new_x(1), P4(2)+l*new_x(2), P4(3)+l*new_x(3), 'X', 'FontSize', 10);
+            text(app.UIAxes, P4(1)+l*new_y(1), P4(2)+l*new_y(2), P4(3)+l*new_y(3), 'Y', 'FontSize', 10);
+            text(app.UIAxes, P4(1)+l*new_z(1), P4(2)+l*new_z(2), P4(3)+l*new_z(3), 'Z', 'FontSize', 10);
+        
+            % === Helper functions ===
+            function T = dh_transform(theta, d, a, alpha)
+                T = [cos(theta), -sin(theta)*cos(alpha),  sin(theta)*sin(alpha), a*cos(theta);
+                     sin(theta),  cos(theta)*cos(alpha), -cos(theta)*sin(alpha), a*sin(theta);
+                     0,           sin(alpha),             cos(alpha),            d;
+                     0,           0,                      0,                     1];
+            end
+        
+            function draw_cylinder_inline(p1, p2, radius, color)
+                [X, Y, Z] = cylinder(radius, 20);
+                h = norm(p2 - p1); Z = Z * h;
+                zaxis = (p2 - p1) / h;
+        
+                if all(abs(zaxis - [0;0;1]) < 1e-6)
+                    R = eye(3);
+                else
+                    v = cross([0;0;1], zaxis);
+                    s = norm(v); c = dot([0;0;1], zaxis);
+                    V = [0 -v(3) v(2); v(3) 0 -v(1); -v(2) v(1) 0];
+                    R = eye(3) + V + V^2 * ((1 - c)/(s^2 + eps));
+                end
+        
+                for k = 1:numel(X)
+                    pt = R * [X(k); Y(k); Z(k)];
+                    X(k) = pt(1) + p1(1);
+                    Y(k) = pt(2) + p1(2);
+                    Z(k) = pt(3) + p1(3);
+                end
+        
+                surf(app.UIAxes, reshape(X, 2, []), reshape(Y, 2, []), reshape(Z, 2, []), ...
+                     'FaceColor', color, 'EdgeColor', 'none', 'FaceAlpha', 0.95);
+            end
+        
+            function draw_hemisphere(center, radius, axis, color)
+                [X, Y, Z] = sphere(20);
+                Z(Z < 0) = 0;
+                X = X * radius + center(1);
+                Y = Y * radius + center(2);
+                Z = Z * radius + center(3);
+                surf(app.UIAxes, X, Y, Z, 'FaceColor', color, 'EdgeColor', 'none');
+            end
+        
+            function draw_cone(base, tip, radius, color)
+                [X, Y, Z] = cylinder([radius 0], 20);
+                h = norm(tip - base); Z = Z * h;
+                zaxis = (tip - base) / h;
+        
+                if all(abs(zaxis - [0;0;1]) < 1e-6)
+                    R = eye(3);
+                else
+                    v = cross([0;0;1], zaxis);
+                    s = norm(v); c = dot([0;0;1], zaxis);
+                    V = [0 -v(3) v(2); v(3) 0 -v(1); -v(2) v(1) 0];
+                    R = eye(3) + V + V^2 * ((1 - c)/(s^2 + eps));
+                end
+        
+                for k = 1:numel(X)
+                    pt = R * [X(k); Y(k); Z(k)];
+                    X(k) = pt(1) + base(1);
+                    Y(k) = pt(2) + base(2);
+                    Z(k) = pt(3) + base(3);
+                end
+        
+                surf(app.UIAxes, reshape(X, 2, []), reshape(Y, 2, []), reshape(Z, 2, []), ...
+                     'FaceColor', color, 'EdgeColor', 'none');
+            end
+
+        end
+
+        % Button pushed function: InverseButton
+        function InverseButtonPushed(app, event)
+            % Đọc vị trí mong muốn từ các ô nhập
+            xd = str2double(app.XEditField.Value);
+            yd = str2double(app.YEditField.Value);
+            zd = str2double(app.ZEditField.Value);
+            target = [xd; yd; zd];
+        
+            % Thông số chiều dài tay máy
+            L1 = 200; L2 = 150; L3 = 150; L4 = 50;
+        
+            % Khởi tạo góc khớp ban đầu
+            theta = deg2rad([0; 0; 0; 0]);
+            
+            % Cài đặt thông số lặp
+            max_iter = 1000;
+            lambda = 0.1;        % hệ số triệt tiêu
+            epsilon = 1e-3;      % ngưỡng hội tụ
+        
+            for i = 1:max_iter
+                % Tính vị trí đầu gắp hiện tại từ góc khớp (Forward Kinematics)
+                A = L2*cos(theta(2)) + L3*cos(theta(2)+theta(3)) + L4*cos(theta(2)+theta(3)+theta(4));
+                x = A*cos(theta(1));
+                y = A*sin(theta(1));
+                z = L1 + L2*sin(theta(2)) + L3*sin(theta(2)+theta(3)) + L4*sin(theta(2)+theta(3)+theta(4));
+                current = [x; y; z];
+        
+                % Sai số vị trí
+                deltaX = target - current;
+                if norm(deltaX) < epsilon
+                    break;
+                end
+        
+                % Tính Jacobian
+                dA_dtheta2 = -L2*sin(theta(2)) - L3*sin(theta(2)+theta(3)) - L4*sin(theta(2)+theta(3)+theta(4));
+                dA_dtheta3 = -L3*sin(theta(2)+theta(3)) - L4*sin(theta(2)+theta(3)+theta(4));
+                dA_dtheta4 = -L4*sin(theta(2)+theta(3)+theta(4));
+                A_val = L2*cos(theta(2)) + L3*cos(theta(2)+theta(3)) + L4*cos(theta(2)+theta(3)+theta(4));
+        
+                J = zeros(3,4);
+                J(:,1) = [-A_val*sin(theta(1));
+                           A_val*cos(theta(1));
+                           0];
+                J(:,2) = [dA_dtheta2*cos(theta(1));
+                          dA_dtheta2*sin(theta(1));
+                          L2*cos(theta(2)) + L3*cos(theta(2)+theta(3)) + L4*cos(theta(2)+theta(3)+theta(4))];
+                J(:,3) = [dA_dtheta3*cos(theta(1));
+                          dA_dtheta3*sin(theta(1));
+                          L3*cos(theta(2)+theta(3)) + L4*cos(theta(2)+theta(3)+theta(4))];
+                J(:,4) = [dA_dtheta4*cos(theta(1));
+                          dA_dtheta4*sin(theta(1));
+                          L4*cos(theta(2)+theta(3)+theta(4))];
+        
+                % Damped Least Squares (DLS) cập nhật góc
+                delta_theta = J' * ((J*J' + lambda^2 * eye(3)) \ deltaX);
+        
+                % Cập nhật góc
+                theta = theta + delta_theta;
+            end
+        
+            % Chuyển sang độ và cập nhật kết quả
+            theta_deg = rad2deg(theta);
+            app.Theta1EditField.Value = num2str(theta_deg(1));
+            app.Theta1EditField_2.Value = num2str(theta_deg(2));
+            app.Theta1EditField_3.Value = num2str(theta_deg(3));
+            app.Theta1EditField_4.Value = num2str(theta_deg(4));
+        
+            % Gọi lại hàm vẽ tay máy với các góc mới
+            ForwardButtonPushed(app, event);
+        end
+    end
+
+    % Component initialization
+    methods (Access = private)
+
+        % Create UIFigure and components
+        function createComponents(app)
+
+            % Create UIFigure and hide until all components are created
+            app.UIFigure = uifigure('Visible', 'off');
+            app.UIFigure.Color = [0.149 0.149 0.149];
+            app.UIFigure.Position = [100 100 1080 611];
+            app.UIFigure.Name = 'MATLAB App';
+            app.UIFigure.Theme = 'dark';
+
+            % Create UIAxes
+            app.UIAxes = uiaxes(app.UIFigure);
+            title(app.UIAxes, '4-DoF robotic arm')
+            xlabel(app.UIAxes, 'X')
+            ylabel(app.UIAxes, 'Y')
+            zlabel(app.UIAxes, 'Z')
+            app.UIAxes.Position = [506 83 527 391];
+
+            % Create Label
+            app.Label = uilabel(app.UIFigure);
+            app.Label.BackgroundColor = [0.2314 0.6667 0.1961];
+            app.Label.Position = [2 534 1081 78];
+            app.Label.Text = '';
+
+            % Create Theta1EditFieldLabel
+            app.Theta1EditFieldLabel = uilabel(app.UIFigure);
+            app.Theta1EditFieldLabel.HorizontalAlignment = 'right';
+            app.Theta1EditFieldLabel.Position = [70 404 46 22];
+            app.Theta1EditFieldLabel.Text = 'Theta 1';
+
+            % Create Theta1EditField
+            app.Theta1EditField = uieditfield(app.UIFigure, 'text');
+            app.Theta1EditField.Position = [131 404 74 22];
+
+            % Create Theta1EditField_2Label
+            app.Theta1EditField_2Label = uilabel(app.UIFigure);
+            app.Theta1EditField_2Label.HorizontalAlignment = 'right';
+            app.Theta1EditField_2Label.Position = [70 332 46 22];
+            app.Theta1EditField_2Label.Text = 'Theta 1';
+
+            % Create Theta1EditField_2
+            app.Theta1EditField_2 = uieditfield(app.UIFigure, 'text');
+            app.Theta1EditField_2.Position = [131 332 74 22];
+
+            % Create Theta1EditField_3Label
+            app.Theta1EditField_3Label = uilabel(app.UIFigure);
+            app.Theta1EditField_3Label.HorizontalAlignment = 'right';
+            app.Theta1EditField_3Label.Position = [70 267 46 22];
+            app.Theta1EditField_3Label.Text = 'Theta 1';
+
+            % Create Theta1EditField_3
+            app.Theta1EditField_3 = uieditfield(app.UIFigure, 'text');
+            app.Theta1EditField_3.Position = [131 267 74 22];
+
+            % Create Theta1EditField_4Label
+            app.Theta1EditField_4Label = uilabel(app.UIFigure);
+            app.Theta1EditField_4Label.HorizontalAlignment = 'right';
+            app.Theta1EditField_4Label.Position = [70 192 46 22];
+            app.Theta1EditField_4Label.Text = 'Theta 1';
+
+            % Create Theta1EditField_4
+            app.Theta1EditField_4 = uieditfield(app.UIFigure, 'text');
+            app.Theta1EditField_4.Position = [131 192 74 22];
+
+            % Create XEditFieldLabel
+            app.XEditFieldLabel = uilabel(app.UIFigure);
+            app.XEditFieldLabel.HorizontalAlignment = 'right';
+            app.XEditFieldLabel.Position = [314 404 25 22];
+            app.XEditFieldLabel.Text = 'X';
+
+            % Create XEditField
+            app.XEditField = uieditfield(app.UIFigure, 'text');
+            app.XEditField.Position = [354 404 74 22];
+
+            % Create YEditFieldLabel
+            app.YEditFieldLabel = uilabel(app.UIFigure);
+            app.YEditFieldLabel.HorizontalAlignment = 'right';
+            app.YEditFieldLabel.Position = [314 332 25 22];
+            app.YEditFieldLabel.Text = 'Y';
+
+            % Create YEditField
+            app.YEditField = uieditfield(app.UIFigure, 'text');
+            app.YEditField.Position = [354 332 74 22];
+
+            % Create ZEditFieldLabel
+            app.ZEditFieldLabel = uilabel(app.UIFigure);
+            app.ZEditFieldLabel.HorizontalAlignment = 'right';
+            app.ZEditFieldLabel.Position = [314 267 25 22];
+            app.ZEditFieldLabel.Text = 'Z';
+
+            % Create ZEditField
+            app.ZEditField = uieditfield(app.UIFigure, 'text');
+            app.ZEditField.Position = [354 267 74 22];
+
+            % Create AngleLabel
+            app.AngleLabel = uilabel(app.UIFigure);
+            app.AngleLabel.HorizontalAlignment = 'center';
+            app.AngleLabel.FontSize = 14;
+            app.AngleLabel.Position = [144 460 41 28];
+            app.AngleLabel.Text = 'Angle';
+
+            % Create PositionLabel
+            app.PositionLabel = uilabel(app.UIFigure);
+            app.PositionLabel.HorizontalAlignment = 'center';
+            app.PositionLabel.FontSize = 14;
+            app.PositionLabel.Position = [364 460 55 28];
+            app.PositionLabel.Text = 'Position';
+
+            % Create ForwardButton
+            app.ForwardButton = uibutton(app.UIFigure, 'push');
+            app.ForwardButton.ButtonPushedFcn = createCallbackFcn(app, @ForwardButtonPushed, true);
+            app.ForwardButton.Position = [120 110 100 23];
+            app.ForwardButton.Text = 'Forward';
+
+            % Create InverseButton
+            app.InverseButton = uibutton(app.UIFigure, 'push');
+            app.InverseButton.ButtonPushedFcn = createCallbackFcn(app, @InverseButtonPushed, true);
+            app.InverseButton.Position = [345 110 100 23];
+            app.InverseButton.Text = 'Inverse';
+
+            % Create ROBOTICARMSIMULATIONLabel
+            app.ROBOTICARMSIMULATIONLabel = uilabel(app.UIFigure);
+            app.ROBOTICARMSIMULATIONLabel.FontSize = 22;
+            app.ROBOTICARMSIMULATIONLabel.FontWeight = 'bold';
+            app.ROBOTICARMSIMULATIONLabel.FontColor = [0 0 0];
+            app.ROBOTICARMSIMULATIONLabel.Position = [56 549 307 48];
+            app.ROBOTICARMSIMULATIONLabel.Text = 'ROBOTIC ARM SIMULATION';
+
+            % Show the figure after all components are created
+            app.UIFigure.Visible = 'on';
+        end
+    end
+
+    % App creation and deletion
+    methods (Access = public)
+
+        % Construct app
+        function app = BTL_RBE2003
+
+            % Create UIFigure and components
+            createComponents(app)
+
+            % Register the app with App Designer
+            registerApp(app, app.UIFigure)
+
+            if nargout == 0
+                clear app
+            end
+        end
+
+        % Code that executes before app deletion
+        function delete(app)
+
+            % Delete UIFigure when app is deleted
+            delete(app.UIFigure)
+        end
+    end
+end
